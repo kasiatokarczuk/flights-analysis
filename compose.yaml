@@ -1,0 +1,75 @@
+name: flights-bigdata
+
+services:
+  namenode:
+    image: apache/hadoop:3.5.0
+    hostname: namenode
+    user: root
+    command: ["hdfs", "namenode"]
+    env_file:
+      - ./infra/hadoop.env
+    environment:
+      # This must match dfs.namenode.name.dir. Initialize an empty volume only.
+      ENSURE_NAMENODE_DIR: /data/name
+    volumes:
+      - namenode_data:/data
+    ports:
+      - "127.0.0.1:9870:9870"
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "hdfs", "dfsadmin", "-safemode", "get"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  datanode:
+    image: apache/hadoop:3.5.0
+    hostname: datanode
+    user: root
+    command: ["hdfs", "datanode"]
+    env_file:
+      - ./infra/hadoop.env
+    volumes:
+      - datanode_data:/data
+    depends_on:
+      namenode:
+        condition: service_healthy
+    mem_limit: 1g
+
+  resourcemanager:
+    image: apache/hadoop:3.5.0
+    hostname: resourcemanager
+    user: root
+    command: ["yarn", "resourcemanager"]
+    env_file:
+      - ./infra/hadoop.env
+      - ./infra/yarn.env
+    ports:
+      - "127.0.0.1:8088:8088"
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://resourcemanager:8088/ws/v1/cluster/info"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  nodemanager:
+    image: apache/hadoop:3.5.0
+    hostname: nodemanager
+    user: root
+    command: ["yarn", "nodemanager"]
+    env_file:
+      - ./infra/hadoop.env
+      - ./infra/yarn.env
+    depends_on:
+      resourcemanager:
+        condition: service_healthy
+      namenode:
+        condition: service_healthy
+    mem_limit: 3g
+
+volumes:
+  namenode_data:
+  datanode_data:
