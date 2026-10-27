@@ -7,3 +7,7 @@ secrets/
 tmp/
 data/
 *.pdf
+*.log
+
+data/*
+!data/manifest.json

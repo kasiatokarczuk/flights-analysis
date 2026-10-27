@@ -30,8 +30,12 @@ services:
     command: ["hdfs", "datanode"]
     env_file:
       - ./infra/hadoop.env
+    environment:
+      HDFS-SITE.XML_dfs.datanode.hostname: localhost
     volumes:
       - datanode_data:/data
+    ports:
+      - "127.0.0.1:9864:9864"
     depends_on:
       namenode:
         condition: service_healthy
