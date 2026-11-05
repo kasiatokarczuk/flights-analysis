@@ -3,7 +3,7 @@
     python scripts/run_cleaning.py                   # wszystkie miesiące -> /flights/clean
     python scripts/run_cleaning.py --month 2024-01   # jeden miesiąc -> /flights/clean-2024-01
 
-Kod mappera i manifest są widoczne w kontenerze resourcemanager dzięki
+Kod mappera i reducera oraz manifest są widoczne w kontenerze resourcemanager dzięki
 zamontowanym katalogom (compose.yaml), więc nie trzeba ich kopiować.
 """
 import argparse
@@ -21,7 +21,8 @@ RESULTS = ROOT / "results"
 STREAMING_JAR = "/opt/hadoop/share/hadoop/tools/lib/hadoop-streaming-3.5.0.jar"
 REASONS = {"structure": "błędna struktura CSV", "date": "data spoza miesiąca pliku",
            "carrier": "brak przewoźnika", "airport": "błędny kod lub ID lotniska",
-           "status": "błędny status odwołania/przekierowania"}
+           "status": "błędny status odwołania/przekierowania",
+           "no_arrival": "lot odbyty, ale bez opóźnienia przylotu"}
 
 
 def hadoop(*command, stdin=None, check=True):
@@ -35,15 +36,21 @@ def hadoop(*command, stdin=None, check=True):
 
 
 def run_job(months, output):
-    """Uruchamia zadanie Hadoop Streaming bez reducera i zwraca jego log."""
+    """Uruchamia zadanie Hadoop Streaming (mapper czyści, reducer usuwa duplikaty) i zwraca log."""
     command = ["docker", "compose", "exec", "-T", "resourcemanager", "hadoop", "jar", STREAMING_JAR,
                "-D", "mapreduce.job.name=flights-cleaning",
-               "-D", "mapreduce.job.reduces=0",  # każdy rekord czyścimy niezależnie
+               "-D", "mapreduce.job.reduces=2",
                "-D", "mapreduce.job.counters.max=256",
+               # Reducer wypisuje gotową linię CSV. Hadoop dzieli ją na klucz i wartość
+               # po pierwszym przecinku i skleja z powrotem tym samym przecinkiem.
+               "-D", "stream.reduce.output.field.separator=,",
+               "-D", "mapreduce.output.textoutputformat.separator=,",
                "-files", "/project/scripts/clean_flights.py,/project/data/manifest.json"]
     for month in months:
         command += ["-input", f"/flights/raw/{month}.csv"]
-    command += ["-output", output, "-mapper", "python3 clean_flights.py",
+    command += ["-output", output,
+                "-mapper", "python3 clean_flights.py map",
+                "-reducer", "python3 clean_flights.py reduce",
                 "-cmdenv", "PYTHONIOENCODING=utf-8"]
 
     # Pełny log zapisujemy do pliku, na ekranie pokazujemy tylko postęp.
@@ -76,15 +83,17 @@ def read_counters(log):
 
 
 def check_counts(counts, manifest, months):
-    """Sprawdza, czy każdy rekord z manifestu został zapisany albo odrzucony."""
+    """Sprawdza, czy każdy rekord z manifestu został zapisany, odrzucony albo uznany za duplikat."""
     for month in months:
         if counts.get("month_" + month) != manifest["files"][month]["records"]:
             raise ValueError(f"Liczba rekordów {month} nie zgadza się z manifestem.")
     if counts.get("headers") != len(months):
         raise ValueError("Liczba nagłówków nie zgadza się z liczbą plików.")
     rejected = sum(v for k, v in counts.items() if k.startswith("rejected_"))
-    if counts.get("written", 0) + rejected != counts["records"]:
-        raise ValueError("Rekordy zapisane i odrzucone nie sumują się do wejścia.")
+    if counts.get("valid", 0) + rejected != counts["records"]:
+        raise ValueError("Rekordy poprawne i odrzucone nie sumują się do wejścia.")
+    if counts.get("written", 0) + counts.get("duplicates", 0) != counts.get("valid", 0):
+        raise ValueError("Rekordy zapisane i duplikaty nie sumują się do poprawnych.")
 
 
 def number(value):
@@ -109,6 +118,7 @@ def save_report(counts, months, output, application):
         "| | Liczba |", "|---|---:|",
         f"| Wczytane | {number(get('records'))} |",
         f"| Odrzucone | {number(sum(rejected.values()))} |",
+        f"| Duplikaty | {number(get('duplicates'))} |",
         f"| Zapisane | {number(get('written'))} |",
         f"| – w tym loty odwołane | {number(get('cancelled'))} |",
         f"| – w tym loty przekierowane | {number(get('diverted'))} |", "",
@@ -122,6 +132,12 @@ def save_report(counts, months, output, application):
               "| Pole | Braki w źródle | Błędne → brak |", "|---|---:|---:|"]
     for name in ["CRSDepTime"] + NUMBERS:
         lines.append(f"| {name} | {number(get('missing_' + name))} | {number(get('invalid_' + name))} |")
+    lines += ["", "## Wartości podejrzane", "",
+              "| Kontrola | Liczba | Co robimy |", "|---|---:|---|",
+              f"| `AirTime` daje prędkość poza zakresem 100–700 mph | "
+              f"{number(get('implausible_AirTime'))} | zamiana na brak |",
+              f"| `ArrDelay` powyżej 24 godzin | {number(get('extreme_ArrDelay'))} | "
+              "zostawiamy, tylko liczymy |"]
     lines += ["",
               "Braki `ArrDelay` i `AirTime` dotyczą głównie lotów odwołanych i przekierowanych. "
               "Przyczyny opóźnień (`CarrierDelay` … `LateAircraftDelay`) są w źródle wypełniane "

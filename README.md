@@ -57,18 +57,26 @@ python scripts/run_cleaning.py                  # wszystkie miesiące -> /flight
 python scripts/run_cleaning.py --month 2024-01  # jeden miesiąc -> /flights/clean-2024-01
 ```
 
-Wymagane są działające kontenery i dane w HDFS. `run_cleaning.py` uruchamia zadanie Hadoop Streaming w YARN, a każdy rekord sprawdza mapper `clean_flights.py`. Reducer nie jest potrzebny, bo rekordy czyścimy niezależnie od siebie ([zadania map-only](https://hadoop.apache.org/docs/r3.5.0/hadoop-streaming/HadoopStreaming.html#Specifying_Map-Only_Jobs)). Katalogi `scripts/` i `data/` są zamontowane w kontenerze `resourcemanager` tylko do odczytu, więc po zmianie `compose.yaml` trzeba raz wykonać `docker compose up -d`.
+Wymagane są działające kontenery i dane w HDFS. `run_cleaning.py` uruchamia zadanie Hadoop Streaming w YARN. Plik `clean_flights.py` zawiera obie części zadania:
+
+- **mapper** sprawdza i czyści każdy rekord, a poprawny wypisuje z kluczem lotu (data, przewoźnik, numer lotu, trasa, planowana godzina odlotu);
+- **reducer** dostaje rekordy posortowane po tym kluczu, zapisuje pierwszy rekord z każdej grupy, a pozostałe liczy jako duplikaty.
+
+Katalogi `scripts/` i `data/` są zamontowane w kontenerze `resourcemanager` tylko do odczytu, więc po zmianie `compose.yaml` trzeba raz wykonać `docker compose up -d`.
 
 Reguły:
 
-- **Odrzucenie rekordu**: błędna struktura CSV, data spoza miesiąca pliku, brak przewoźnika, błędny kod (3 litery) lub ID lotniska, status odwołania/przekierowania inny niż 0/1 albo oba naraz.
+- **Odrzucenie rekordu**: błędna struktura CSV, data spoza miesiąca pliku, brak przewoźnika, błędny kod (3 litery) lub ID lotniska, status odwołania/przekierowania inny niż 0/1 albo oba naraz, lot odbyty (nie odwołany i nie przekierowany) bez opóźnienia przylotu.
 - **Ujednolicenie**: usunięcie spacji na brzegach pól, kody lotnisk wielkimi literami, statusy `1.00` → `1`, godzina odlotu w formacie `HHMM` (dopuszczalne `2400`).
 - **Błędne wartości opcjonalne** (np. tekst zamiast liczby, ujemny dystans) zamieniamy na brak, nie na zero.
+- **Nierealny czas lotu**: jeśli z `Distance` i `AirTime` wychodzi średnia prędkość poza zakresem 100–700 mph, `AirTime` zamieniamy na brak.
+- **Duplikaty**: z rekordów o tym samym kluczu lotu zostaje pierwszy.
+- **Skrajne opóźnienia** (przylot ponad 24 godziny po czasie) zostawiamy, bo mogą być prawdziwe, ale liczymy je w raporcie.
 - **Zostawiamy**: ujemne opóźnienia (lot przed czasem), loty odwołane i przekierowane oraz braki danych. Braki przyczyn opóźnień nie są błędem: źródło wypełnia je tylko dla przylotów opóźnionych o co najmniej 15 minut ([zasady raportowania](https://www.bts.gov/explore-topics-and-geography/modes/aviation/number-39-technical-directive-reporting-time)).
 
 Wynik w HDFS to CSV z 21 wybranymi kolumnami, bez nagłówka; kolejność kolumn opisuje `_schema.json` w katalogu wyniku. Oryginalne pliki w `/flights/raw/` pozostają bez zmian. Istniejący katalog wyniku nie jest nadpisywany — skrypt podaje polecenie, którym można go usunąć.
 
-Po zakończeniu skrypt sprawdza, czy liczba rekordów każdego miesiąca zgadza się z manifestem i czy każdy rekord został zapisany albo odrzucony. Wyniki:
+Po zakończeniu skrypt sprawdza, czy liczba rekordów każdego miesiąca zgadza się z manifestem i czy każdy rekord został zapisany, odrzucony albo uznany za duplikat. Wyniki:
 
 - `results/data_quality.md` — raport do czytania,
 - `results/data_quality.json` — te same liczniki w formacie JSON,

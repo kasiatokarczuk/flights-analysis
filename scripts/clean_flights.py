@@ -1,11 +1,18 @@
-"""Mapper Hadoop Streaming: sprawdza i czyści rekordy lotów.
+"""Mapper i reducer Hadoop Streaming: sprawdzają i czyszczą rekordy lotów.
 
-Wejście: surowe CSV z /flights/raw/. Hadoop dzieli duże pliki na fragmenty, więc
-tylko pierwszy fragment pliku ma nagłówek - kolejność kolumn bierzemy z manifestu.
-Wyjście: CSV z 21 wybranymi kolumnami, bez nagłówka.
+Mapper (python3 clean_flights.py map):
+    czyta surowe CSV z /flights/raw/, sprawdza każdy rekord i wypisuje go
+    w postaci "klucz lotu<TAB>rekord CSV". Hadoop dzieli duże pliki na fragmenty,
+    więc tylko pierwszy fragment pliku ma nagłówek - kolejność kolumn bierzemy z manifestu.
+Reducer (python3 clean_flights.py reduce):
+    dostaje rekordy posortowane po kluczu lotu, więc duplikaty leżą obok siebie.
+    Zapisuje pierwszy rekord z każdej grupy, a pozostałe liczy jako duplikaty.
+
+Wynik: CSV z 21 wybranymi kolumnami, bez nagłówka.
 Liczniki (ile rekordów, ile odrzuconych, ile braków) trafiają do Hadoop przez stderr.
 """
 import csv
+import io
 import json
 import math
 import os
@@ -24,6 +31,11 @@ COLUMNS = [
 NUMBERS = ["DepDelay", "ArrDelay", "Distance", "AirTime",
            "CarrierDelay", "WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay"]
 CAN_BE_NEGATIVE = {"DepDelay", "ArrDelay"}  # lot przed czasem ma ujemne opóźnienie
+# Jeden lot = ta sama data, przewoźnik, numer lotu, trasa i planowana godzina odlotu.
+FLIGHT_KEY = ["FlightDate", "Reporting_Airline", "Flight_Number_Reporting_Airline",
+              "Origin", "Dest", "CRSDepTime"]
+MIN_SPEED, MAX_SPEED = 100, 700  # realna średnia prędkość lotu w milach na godzinę
+EXTREME_DELAY = 24 * 60  # opóźnienie przylotu powyżej doby (w minutach)
 
 
 def as_flag(value):
@@ -62,6 +74,8 @@ def reject_reason(flight, month):
         return "status"
     if flight["Cancelled"] == flight["Diverted"] == "1":
         return "status"  # lot nie może być jednocześnie odwołany i przekierowany
+    if flight["Cancelled"] == flight["Diverted"] == "0" and not flight["ArrDelay"]:
+        return "no_arrival"  # lot się odbył, więc powinien mieć opóźnienie przylotu
     return None
 
 
@@ -101,6 +115,17 @@ def clean_row(row, month, counts):
             flight[name] = ""
             counts["invalid_" + name] += 1
 
+    # Czas w powietrzu jest nierealny, jeśli wychodzi z niego prędkość poza zakresem.
+    if flight["AirTime"] and flight["Distance"]:
+        hours = float(flight["AirTime"]) / 60
+        if hours == 0 or not MIN_SPEED <= float(flight["Distance"]) / hours <= MAX_SPEED:
+            flight["AirTime"] = ""
+            counts["implausible_AirTime"] += 1
+
+    # Bardzo duże opóźnienia zostawiamy (mogą być prawdziwe), ale je liczymy.
+    if flight["ArrDelay"] and float(flight["ArrDelay"]) > EXTREME_DELAY:
+        counts["extreme_ArrDelay"] += 1
+
     if flight["Cancelled"] == "1":
         counts["cancelled"] += 1
     elif flight["Diverted"] == "1":
@@ -110,6 +135,19 @@ def clean_row(row, month, counts):
     return flight
 
 
+def to_csv(values):
+    """Zamienia listę wartości na jedną linię CSV (pola z przecinkiem trafiają w cudzysłów)."""
+    buffer = io.StringIO()
+    csv.writer(buffer, lineterminator="").writerow(values)
+    return buffer.getvalue()
+
+
+def report_counters(counts):
+    """Przekazuje liczniki do Hadoop w formacie reporter:counter:grupa,nazwa,wartość."""
+    for name, value in sorted(counts.items()):
+        print(f"reporter:counter:FlightQuality,{name},{value}", file=sys.stderr)
+
+
 def mapper():
     header = json.loads(Path("manifest.json").read_text(encoding="utf-8"))["columns"]
     position = {name: index for index, name in enumerate(header)}
@@ -117,7 +155,6 @@ def mapper():
     month = Path(os.environ["mapreduce_map_input_file"]).stem
 
     counts = Counter()
-    writer = csv.writer(sys.stdout, lineterminator="\n")
     for line in sys.stdin:
         try:
             values = next(csv.reader([line.lstrip("﻿")], strict=True))
@@ -133,12 +170,28 @@ def mapper():
             continue
         flight = clean_row({name: values[position[name]] for name in COLUMNS}, month, counts)
         if flight:
-            writer.writerow(flight[name] for name in COLUMNS)
-            counts["written"] += 1
+            key = "|".join(flight[name] for name in FLIGHT_KEY)
+            print(key + "\t" + to_csv(flight[name] for name in COLUMNS))
+            counts["valid"] += 1
+    report_counters(counts)
 
-    for name, value in sorted(counts.items()):
-        print(f"reporter:counter:FlightQuality,{name},{value}", file=sys.stderr)
+
+def reducer():
+    counts = Counter()
+    previous_key = None
+    for line in sys.stdin:
+        key, row = line.rstrip("\n").split("\t", 1)
+        if key == previous_key:
+            counts["duplicates"] += 1
+            continue
+        previous_key = key
+        print(row)
+        counts["written"] += 1
+    report_counters(counts)
 
 
 if __name__ == "__main__":
-    mapper()
+    if sys.argv[1] == "map":
+        mapper()
+    else:
+        reducer()

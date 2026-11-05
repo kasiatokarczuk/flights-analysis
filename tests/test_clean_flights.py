@@ -1,4 +1,4 @@
-"""Reguły czyszczenia, CSV z przecinkami w polach i fragmenty Hadoop bez nagłówka."""
+"""Reguły czyszczenia, CSV z przecinkami w polach, fragmenty Hadoop bez nagłówka i duplikaty."""
 import csv
 import io
 import json
@@ -38,18 +38,25 @@ def csv_text(rows, header=False):
     return stream.getvalue()
 
 
-def run_mapper(text):
-    """Uruchamia mapper tak jak Hadoop: CSV na wejściu, liczniki na stderr."""
+def run(function, text):
+    """Uruchamia mapper albo reducer tak jak Hadoop: dane na stdin, liczniki na stderr."""
     out, err = io.StringIO(), io.StringIO()
     with patch.object(worker.Path, "read_text", return_value=json.dumps({"columns": HEADER})), \
          patch.dict(worker.os.environ, {"mapreduce_map_input_file": "/flights/raw/2024-01.csv"}), \
          patch.object(sys, "stdin", io.StringIO(text)), redirect_stdout(out), redirect_stderr(err):
-        worker.mapper()
+        function()
     counts = Counter()
     for line in err.getvalue().splitlines():
         _, name, value = line.split(",")
         counts[name] += int(value)
-    return list(csv.reader(io.StringIO(out.getvalue()))), counts
+    return out.getvalue(), counts
+
+
+def run_job(text):
+    """Mapper -> sortowanie po kluczu (jak w Hadoop) -> reducer. Zwraca rekordy CSV i liczniki."""
+    mapped, map_counts = run(worker.mapper, text)
+    reduced, reduce_counts = run(worker.reducer, "".join(sorted(mapped.splitlines(keepends=True))))
+    return list(csv.reader(io.StringIO(reduced))), map_counts + reduce_counts
 
 
 class CleaningTests(unittest.TestCase):
@@ -61,15 +68,18 @@ class CleaningTests(unittest.TestCase):
         self.assertEqual(cleaned["CRSDepTime"], "0056")
         self.assertEqual((cleaned["Cancelled"], cleaned["Diverted"]), ("0", "0"))
 
-    def test_cancelled_and_diverted_flights_are_kept(self):
-        for changes, status in [({"Cancelled": "1.00"}, "cancelled"),
-                                ({"Diverted": "1"}, "diverted"), ({}, "regular")]:
+    def test_cancelled_and_diverted_flights_without_arrival_are_kept(self):
+        for changes, status in [({"Cancelled": "1.00"}, "cancelled"), ({"Diverted": "1"}, "diverted")]:
             with self.subTest(status=status):
                 counts = Counter()
                 cleaned = worker.clean_row(flight(ArrDelay="", **changes), "2024-01", counts)
                 self.assertEqual(cleaned["ArrDelay"], "")
                 self.assertEqual(counts[status], 1)
-                self.assertEqual(counts["missing_ArrDelay"], 1)
+
+    def test_regular_flight_without_arrival_is_rejected(self):
+        counts = Counter()
+        self.assertIsNone(worker.clean_row(flight(ArrDelay=""), "2024-01", counts))
+        self.assertEqual(counts, {"rejected_no_arrival": 1})
 
     def test_bad_optional_values_become_missing_not_zero(self):
         counts = Counter()
@@ -79,6 +89,21 @@ class CleaningTests(unittest.TestCase):
             self.assertEqual(cleaned[name], "")
             self.assertEqual(counts["invalid_" + name], 1)
         self.assertEqual(cleaned["CarrierDelay"], "0")
+
+    def test_implausible_air_time_becomes_missing(self):
+        # 1148 mil: 184 min to ok. 374 mph; 30 min to ponad 2000 mph, 0 min jest niemożliwe.
+        for air_time, expected in [("184.00", "184.00"), ("30.00", ""), ("0.00", "")]:
+            with self.subTest(air_time=air_time):
+                counts = Counter()
+                cleaned = worker.clean_row(flight(AirTime=air_time), "2024-01", counts)
+                self.assertEqual(cleaned["AirTime"], expected)
+                self.assertEqual(counts["implausible_AirTime"], int(expected == ""))
+
+    def test_extreme_delay_is_counted_but_kept(self):
+        counts = Counter()
+        cleaned = worker.clean_row(flight(ArrDelay="1500.00"), "2024-01", counts)
+        self.assertEqual(cleaned["ArrDelay"], "1500.00")
+        self.assertEqual(counts["extreme_ArrDelay"], 1)
 
     def test_scheduled_time_validation(self):
         for value, expected in [("2400", "2400"), ("2360", ""), ("2500", ""), ("abc", ""), ("", "")]:
@@ -104,20 +129,27 @@ class CleaningTests(unittest.TestCase):
         self.assertEqual(counts["rejected_status"], 1)
 
     def test_split_without_header_gives_same_result(self):
-        rows = [flight(), flight(FlightDate="2024-01-09", ArrDelay="")]
-        combined, all_counts = run_mapper(csv_text(rows, header=True))
-        first, a = run_mapper(csv_text(rows[:1], header=True))
-        second, b = run_mapper(csv_text(rows[1:]))
+        rows = [flight(), flight(FlightDate="2024-01-09", ArrDelay="3.00")]
+        combined, all_counts = run(worker.mapper, csv_text(rows, header=True))
+        first, a = run(worker.mapper, csv_text(rows[:1], header=True))
+        second, b = run(worker.mapper, csv_text(rows[1:]))
         self.assertEqual(combined, first + second)
         self.assertEqual(all_counts, a + b)
         self.assertEqual((all_counts["records"], all_counts["headers"]), (2, 1))
         self.assertEqual(all_counts["month_2024-01"], 2)
-        self.assertEqual(combined[0][worker.COLUMNS.index("OriginCityName")], "New York, NY")
 
     def test_bad_structure_is_counted_and_not_written(self):
-        rows, counts = run_mapper(csv_text([flight()], header=True) + '"unterminated\n1,2,3\n')
+        rows, counts = run_job(csv_text([flight()], header=True) + '"unterminated\n1,2,3\n')
         self.assertEqual(len(rows), 1)
         self.assertEqual((counts["records"], counts["written"], counts["rejected_structure"]), (3, 1, 2))
+
+    def test_duplicates_are_removed_by_reducer(self):
+        rows = [flight(), flight(FlightDate="2024-01-09"), flight(DepDelay="99.00")]
+        written, counts = run_job(csv_text(rows, header=True))
+        self.assertEqual((counts["valid"], counts["written"], counts["duplicates"]), (3, 2, 1))
+        self.assertEqual(len(written), 2)
+        self.assertEqual(written[0][worker.COLUMNS.index("OriginCityName")], "New York, NY")
+        self.assertEqual(len(written[0]), len(worker.COLUMNS))
 
     def test_counters_are_read_only_from_flight_group(self):
         log = "INFO done\n\tFlightQuality\n\t\trecords=25\n\t\tmonth_2024-01=25\n\tOther\n\t\trecords=9\n"
