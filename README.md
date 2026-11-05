@@ -14,7 +14,11 @@ Pobrany zbiór obejmuje styczeń 2024 – wrzesień 2025: **21 plików CSV, 12 3
 
 ## Wymagania
 
-Windows, Python 3.11 lub nowszy oraz uruchomiony Docker Desktop z Docker Compose. Skrypty korzystają wyłącznie z biblioteki standardowej Pythona.
+Windows, Python 3.11 lub nowszy oraz uruchomiony Docker Desktop z Docker Compose. Biblioteki potrzebne do scrapingu:
+
+```powershell
+pip install -r requirements.txt
+```
 
 Poniższe polecenia należy wykonywać w głównym folderze projektu.
 
@@ -111,6 +115,28 @@ Po zakończeniu skrypt sprawdza, czy liczba lotów w analizie zgadza się z licz
 - `results/analysis.log` — pełny log Hadoop.
 
 Wspólne funkcje obu skryptów uruchamiających zadania (`run_cleaning.py`, `run_analysis.py`) są w `common.py`.
+
+## Web scraping: lotniska i przewoźnicy z Wikipedii
+
+```powershell
+python scripts/scrape_wikipedia.py            # użyj zapisanych stron, jeśli są
+python scripts/scrape_wikipedia.py --refresh  # pobierz strony od nowa
+```
+
+Skrypt pobiera dwie strony Wikipedii (`requests`) i odczytuje z nich tabele (`BeautifulSoup`):
+
+- [List of airports in the United States](https://en.wikipedia.org/wiki/List_of_airports_in_the_United_States) — kody FAA/IATA/ICAO, nazwa, miasto, stan, kategoria FAA (*Role*) i liczba pasażerów odprawionych w 2019 roku. Stan nie jest osobną kolumną: wiersz z samą nazwą stanu (np. „ALABAMA”) poprzedza lotniska z tego stanu.
+- [List of airlines of the United States](https://en.wikipedia.org/wiki/List_of_airlines_of_the_United_States) — nazwa, kody IATA/ICAO, typ (linia główna, regionalna, cargo… według sekcji strony) i informacja, pod jaką marką lata linia regionalna (np. *Operates as Delta Connection*).
+
+Kategoria FAA opisuje wielkość lotniska według udziału w ruchu pasażerskim USA: P-L (duże, co najmniej 1%), P-M (średnie, 0,25–1%), P-S (małe, 0,05–0,25%), P-N (bardzo małe, poniżej 0,05%). Pozostałe oznaczenia (CS, R, GA) i brak kategorii trafiają do grupy „inne / brak”. Dzięki temu wyniki analizy lotnisk można porównać według wielkości lotniska i stanu.
+
+Pobrane strony są zapisywane w `data/scraped/` razem z datą pobrania, więc ponowne uruchomienie nie odpytuje Wikipedii (chyba że z opcją `--refresh`). Skrypt sprawdza poprawność i powtórzenia kodów lotnisk oraz dopasowuje dane do kodów z wyników analiz. Przewoźników, których w tabeli Wikipedii nie ma pod naszym kodem (Hawaiian — po połączeniu z Alaska Airlines strona podaje kod AS; Spirit), uzupełniamy ręcznie i oznaczamy jako `"source": "manual"`.
+
+Wyniki:
+
+- `results/airports.json` — wszystkie lotniska z tabeli,
+- `results/carriers.json` — przewoźnicy z naszych danych,
+- `results/scraping.md` — raport: liczba rekordów, problemy jakości, dopasowanie do naszych lotnisk i przewoźników.
 
 ## Testy
 

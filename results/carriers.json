@@ -1,0 +1,144 @@
+[
+  {
+    "iata": "9E",
+    "icao": "EDV",
+    "name": "Endeavor Air",
+    "callsign": "ENDEAVOR",
+    "section": "Regional",
+    "type": "regional",
+    "operates_as": "Delta Connection",
+    "source": "wikipedia"
+  },
+  {
+    "iata": "AA",
+    "icao": "AAL",
+    "name": "American Airlines",
+    "callsign": "AMERICAN",
+    "section": "Mainline",
+    "type": "mainline",
+    "operates_as": null,
+    "source": "wikipedia"
+  },
+  {
+    "iata": "AS",
+    "icao": "ASA",
+    "name": "Alaska Airlines",
+    "callsign": "ALASKA",
+    "section": "Mainline",
+    "type": "mainline",
+    "operates_as": null,
+    "source": "wikipedia"
+  },
+  {
+    "iata": "B6",
+    "icao": "JBU",
+    "name": "JetBlue",
+    "callsign": "JETBLUE",
+    "section": "Mainline",
+    "type": "mainline",
+    "operates_as": null,
+    "source": "wikipedia"
+  },
+  {
+    "iata": "DL",
+    "icao": "DAL",
+    "name": "Delta Air Lines",
+    "callsign": "DELTA",
+    "section": "Mainline",
+    "type": "mainline",
+    "operates_as": null,
+    "source": "wikipedia"
+  },
+  {
+    "iata": "F9",
+    "icao": "FFT",
+    "name": "Frontier Airlines",
+    "callsign": "FRONTIER FLIGHT",
+    "section": "Mainline",
+    "type": "mainline",
+    "operates_as": null,
+    "source": "wikipedia"
+  },
+  {
+    "iata": "G4",
+    "icao": "AAY",
+    "name": "Allegiant Air",
+    "callsign": "ALLEGIANT",
+    "section": "Mainline",
+    "type": "mainline",
+    "operates_as": null,
+    "source": "wikipedia"
+  },
+  {
+    "iata": "HA",
+    "name": "Hawaiian Airlines",
+    "type": "mainline",
+    "source": "manual"
+  },
+  {
+    "iata": "MQ",
+    "icao": "ENY",
+    "name": "Envoy Air",
+    "callsign": "ENVOY",
+    "section": "Regional",
+    "type": "regional",
+    "operates_as": "American Eagle",
+    "source": "wikipedia"
+  },
+  {
+    "iata": "NK",
+    "name": "Spirit Airlines",
+    "type": "mainline",
+    "source": "manual"
+  },
+  {
+    "iata": "OH",
+    "icao": "JIA",
+    "name": "PSA Airlines",
+    "callsign": "BLUE STREAK",
+    "section": "Regional",
+    "type": "regional",
+    "operates_as": "American Eagle",
+    "source": "wikipedia"
+  },
+  {
+    "iata": "OO",
+    "icao": "SKW",
+    "name": "SkyWest Airlines",
+    "callsign": "SKYWEST",
+    "section": "Regional",
+    "type": "regional",
+    "operates_as": "Delta Connection",
+    "source": "wikipedia"
+  },
+  {
+    "iata": "UA",
+    "icao": "UAL",
+    "name": "United Airlines",
+    "callsign": "UNITED",
+    "section": "Mainline",
+    "type": "mainline",
+    "operates_as": null,
+    "source": "wikipedia"
+  },
+  {
+    "iata": "WN",
+    "icao": "SWA",
+    "name": "Southwest Airlines",
+    "callsign": "SOUTHWEST",
+    "section": "Mainline",
+    "type": "mainline",
+    "operates_as": null,
+    "source": "wikipedia"
+  },
+  {
+    "iata": "YX",
+    "icao": "RPA",
+    "name": "Republic Airways",
+    "callsign": "BRICKYARD",
+    "section": "Regional",
+    "type": "regional",
+    "operates_as": "American Eagle",
+    "source": "wikipedia"
+  }
+]
