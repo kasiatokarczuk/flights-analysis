@@ -22,7 +22,7 @@ def docker(*command, stdin=None, check=True):
 
 
 def hdfs_hash(path):
-    # Liczymy sume w kontenerze. Do Windows wraca tylko krotki wynik, nie caly CSV.
+    # Obliczana suma w kontenerze, do Windows wraca tylko krotki wynik (nie caly CSV).
     result = docker("bash", "-o", "pipefail", "-c", 'hdfs dfs -cat "$1" | sha256sum', "_", path)
     return result.stdout.split()[0]
 

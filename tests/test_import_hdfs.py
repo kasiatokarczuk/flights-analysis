@@ -137,7 +137,7 @@ class HdfsImportTests(unittest.TestCase):
         self.assertEqual(self.backend.uploads.count("/flights/raw/.2024-01.csv.uploading"), 1)
 
     def test_docker_failure_exposes_reason(self):
-        # Test rzeczywistego wrappera zamiast atrapionego backendu.
+        # Test rzeczywistego wrappera
         patch.stopall()
         failure = SimpleNamespace(returncode=1, stderr="NameNode unavailable", stdout="")
         with patch.object(importer.subprocess, "run", return_value=failure):

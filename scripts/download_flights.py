@@ -52,7 +52,7 @@ def directory_lock(root):
 
 
 def download_zip(url, path):
-    """Czytaj po 1 MB; po bledzie polaczenia ponow najwyzej dwukrotnie."""
+    """Czyta po 1 MB; po bledzie polaczenia ponawia max dwukrotnie."""
     temporary = path.with_suffix(".zip.part")
     for attempt in range(3):
         try:
@@ -82,7 +82,7 @@ def download_zip(url, path):
 
 
 def extract_csv(archive, temporary, label, columns):
-    """Rozpakuj oryginalny CSV i sprawdz jego strukture; ZipFile weryfikuje CRC."""
+    """Rozpakowuje oryginalny CSV i sprawdza jego strukture."""
     with zipfile.ZipFile(archive) as zipped:
         files = [f for f in zipped.infolist() if f.filename.endswith(".csv") and not f.filename.startswith("__MACOSX/")]
         if len(files) != 1:

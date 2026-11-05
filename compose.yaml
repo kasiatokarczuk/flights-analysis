@@ -49,6 +49,10 @@ services:
     env_file:
       - ./infra/hadoop.env
       - ./infra/yarn.env
+    volumes:
+      # Kod i manifest dla zadań Hadoop Streaming (tylko do odczytu).
+      - ./scripts:/project/scripts:ro
+      - ./data:/project/data:ro
     ports:
       - "127.0.0.1:8088:8088"
     mem_limit: 1g
