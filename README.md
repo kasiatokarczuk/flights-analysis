@@ -36,7 +36,11 @@ Uruchomienie klastra:
 docker compose up -d
 ```
 
-Panele: [HDFS — pliki i stan magazynu](http://localhost:9870), [YARN — zadania obliczeniowe](http://localhost:8088).
+Panele:
+
+- [HDFS — pliki i stan magazynu](http://localhost:9870) (menu *Utilities → Browse the file system*),
+- [YARN — zadania obliczeniowe](http://localhost:8088) (tylko zadania od ostatniego startu kontenera),
+- [Historia zadań MapReduce](http://localhost:19888) (zakończone zadania z licznikami i czasami, także po restarcie).
 
 Podgląd zawartości plików w panelu HDFS korzysta z DataNode pod adresem `localhost:9864`. W lokalnej konfiguracji port jest udostępniony wyłącznie na tym komputerze, a DataNode zgłasza nazwę `localhost`, aby przekierowanie działało w przeglądarce. Woluminy przechowujące dane są niezależne od odtwarzania kontenerów.
 
@@ -81,6 +85,32 @@ Po zakończeniu skrypt sprawdza, czy liczba rekordów każdego miesiąca zgadza 
 - `results/data_quality.md` — raport do czytania,
 - `results/data_quality.json` — te same liczniki w formacie JSON,
 - `results/cleaning.log` — pełny log Hadoop ostatniego przebiegu.
+
+## Analizy statystyczne w Hadoop
+
+```powershell
+python scripts/run_analysis.py
+```
+
+Wejściem są oczyszczone dane z `/flights/clean`, a wynik trafia do `/flights/analysis` w HDFS. Mapper i reducer są w `analyze_flights.py`. Jedno zadanie MapReduce liczy statystyki dla pięciu analiz:
+
+1. **Punktualność przewoźników** — liczba lotów, odsetek przylotów na czas, średnie i mediana opóźnienia przylotu, odsetek odwołań.
+2. **Sezonowość** — te same miary według miesięcy i dni tygodnia.
+3. **Godzina planowanego odlotu** — odsetek opóźnionych odlotów i przylotów oraz średnie opóźnienie odlotu.
+4. **Przyczyny opóźnień** — udział minut opóźnienia z pięciu przyczyn raportowanych przez BTS, łącznie i dla każdego przewoźnika.
+5. **Lotniska** — liczba odlotów, odsetek opóźnionych odlotów, średnie opóźnienie odlotu i odsetek odwołań.
+
+Lot jest „na czas”, gdy przyleciał z opóźnieniem mniejszym niż 15 minut (definicja BTS).
+
+Mapper nie wypisuje każdego lotu osobno. Dla każdej grupy (przewoźnik, miesiąc, dzień tygodnia, godzina, lotnisko, cały zbiór) sumuje statystyki w pamięci i wypisuje je na końcu (*in-mapper combining*). Dzięki temu do reducera trafia kilkaset linii zamiast 12 mln. Reducer łączy sumy z wszystkich mapperów i liczy wskaźniki. Mediana jest dokładna, bo mapper zapisuje histogram opóźnień co do minuty, a histogramy z różnych mapperów można po prostu zsumować.
+
+Po zakończeniu skrypt sprawdza, czy liczba lotów w analizie zgadza się z liczbą rekordów zapisanych przy czyszczeniu. Wyniki:
+
+- `results/analysis.md` — tabele wszystkich analiz,
+- `results/analysis.json` — pełne wyniki (m.in. wszystkie lotniska),
+- `results/analysis.log` — pełny log Hadoop.
+
+Wspólne funkcje obu skryptów uruchamiających zadania (`run_cleaning.py`, `run_analysis.py`) są w `common.py`.
 
 ## Testy
 

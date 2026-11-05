@@ -3,69 +3,21 @@
     python scripts/run_cleaning.py                   # wszystkie miesiące -> /flights/clean
     python scripts/run_cleaning.py --month 2024-01   # jeden miesiąc -> /flights/clean-2024-01
 
-Kod mappera i reducera oraz manifest są widoczne w kontenerze resourcemanager dzięki
-zamontowanym katalogom (compose.yaml), więc nie trzeba ich kopiować.
+Mapper i reducer: scripts/clean_flights.py.
 """
 import argparse
 import json
 import re
-import subprocess
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 from clean_flights import COLUMNS, NUMBERS
+from common import ROOT, RESULTS, application_id, hadoop, hdfs_exists, number, run_streaming
 
-ROOT = Path(__file__).resolve().parents[1]
-RESULTS = ROOT / "results"
-STREAMING_JAR = "/opt/hadoop/share/hadoop/tools/lib/hadoop-streaming-3.5.0.jar"
 REASONS = {"structure": "błędna struktura CSV", "date": "data spoza miesiąca pliku",
            "carrier": "brak przewoźnika", "airport": "błędny kod lub ID lotniska",
            "status": "błędny status odwołania/przekierowania",
            "no_arrival": "lot odbyty, ale bez opóźnienia przylotu"}
-
-
-def hadoop(*command, stdin=None, check=True):
-    """Wykonuje polecenie (hdfs, yarn, hadoop) w kontenerze resourcemanager."""
-    result = subprocess.run(
-        ["docker", "compose", "exec", "-T", "resourcemanager", *command],
-        cwd=ROOT, input=stdin, capture_output=True, text=True, encoding="utf-8")
-    if check and result.returncode:
-        raise RuntimeError(result.stderr.strip() or "Polecenie Docker zakończyło się błędem.")
-    return result
-
-
-def run_job(months, output):
-    """Uruchamia zadanie Hadoop Streaming (mapper czyści, reducer usuwa duplikaty) i zwraca log."""
-    command = ["docker", "compose", "exec", "-T", "resourcemanager", "hadoop", "jar", STREAMING_JAR,
-               "-D", "mapreduce.job.name=flights-cleaning",
-               "-D", "mapreduce.job.reduces=2",
-               "-D", "mapreduce.job.counters.max=256",
-               # Reducer wypisuje gotową linię CSV. Hadoop dzieli ją na klucz i wartość
-               # po pierwszym przecinku i skleja z powrotem tym samym przecinkiem.
-               "-D", "stream.reduce.output.field.separator=,",
-               "-D", "mapreduce.output.textoutputformat.separator=,",
-               "-files", "/project/scripts/clean_flights.py,/project/data/manifest.json"]
-    for month in months:
-        command += ["-input", f"/flights/raw/{month}.csv"]
-    command += ["-output", output,
-                "-mapper", "python3 clean_flights.py map",
-                "-reducer", "python3 clean_flights.py reduce",
-                "-cmdenv", "PYTHONIOENCODING=utf-8"]
-
-    # Pełny log zapisujemy do pliku, na ekranie pokazujemy tylko postęp.
-    lines = []
-    with subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                          text=True, encoding="utf-8") as process:
-        for line in process.stdout:
-            lines.append(line)
-            if " map " in line or "ERROR" in line or "Submitted application" in line:
-                print(line.rstrip())
-    log = "".join(lines)
-    (RESULTS / "cleaning.log").write_text(log, encoding="utf-8")
-    if process.returncode:
-        raise RuntimeError("Zadanie Hadoop nie powiodło się. Szczegóły: results/cleaning.log")
-    return log
 
 
 def read_counters(log):
@@ -94,10 +46,6 @@ def check_counts(counts, manifest, months):
         raise ValueError("Rekordy poprawne i odrzucone nie sumują się do wejścia.")
     if counts.get("written", 0) + counts.get("duplicates", 0) != counts.get("valid", 0):
         raise ValueError("Rekordy zapisane i duplikaty nie sumują się do poprawnych.")
-
-
-def number(value):
-    return f"{value:,}".replace(",", " ")
 
 
 def save_report(counts, months, output, application):
@@ -156,16 +104,23 @@ def main():
     output = "/flights/clean" + (f"-{args.month}" if args.month else "")
 
     # Istniejącego wyniku nie nadpisujemy - trzeba go usunąć ręcznie.
-    if hadoop("hdfs", "dfs", "-test", "-e", output, check=False).returncode == 0:
+    if hdfs_exists(output):
         sys.exit(f"Katalog {output} już istnieje w HDFS. Aby powtórzyć czyszczenie, usuń go:\n"
                  f"  docker compose exec resourcemanager hdfs dfs -rm -r {output}")
 
-    RESULTS.mkdir(exist_ok=True)
     print(f"Czyszczenie {len(months)} plików w Hadoop. Wynik: {output}")
-    log = run_job(months, output)
+    log = run_streaming(
+        "flights-cleaning", [f"/flights/raw/{month}.csv" for month in months], output,
+        "scripts/clean_flights.py", files=["data/manifest.json"], reducers=2,
+        options=["mapreduce.job.counters.max=256",
+                 # Reducer wypisuje gotową linię CSV. Hadoop dzieli ją na klucz i wartość
+                 # po pierwszym przecinku i skleja z powrotem tym samym przecinkiem.
+                 "stream.reduce.output.field.separator=,",
+                 "mapreduce.output.textoutputformat.separator=,"],
+        log_name="cleaning.log")
     counts = read_counters(log)
     check_counts(counts, manifest, months)
-    application = re.search(r"application_\d+_\d+", log)[0]
+    application = application_id(log)
 
     # Pliki part-* nie mają nagłówka; kolejność kolumn zapisujemy obok wyniku.
     schema = json.dumps({"format": "csv", "header": False, "columns": COLUMNS}, indent=2)

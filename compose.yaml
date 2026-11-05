@@ -78,6 +78,24 @@ services:
         condition: service_healthy
     mem_limit: 3g
 
+  # Serwer historii zadań: zakończone zadania MapReduce (liczniki, czasy, zadania map/reduce)
+  # są widoczne pod http://localhost:19888 także po restarcie YARN.
+  historyserver:
+    image: apache/hadoop:3.5.0
+    hostname: historyserver
+    user: root
+    command: ["mapred", "historyserver"]
+    env_file:
+      - ./infra/hadoop.env
+      - ./infra/yarn.env
+    ports:
+      - "127.0.0.1:19888:19888"
+    depends_on:
+      namenode:
+        condition: service_healthy
+    restart: unless-stopped  # po starcie HDFS bywa chwilę w safe mode, wtedy serwer startuje ponownie
+    mem_limit: 1g
+
 volumes:
   namenode_data:
   datanode_data:
