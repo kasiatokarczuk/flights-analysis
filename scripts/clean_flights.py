@@ -27,7 +27,7 @@ CAN_BE_NEGATIVE = {"DepDelay", "ArrDelay"}  # lot przed czasem ma ujemne opóźn
 
 
 def as_flag(value):
-    """'0', '0.00', '1', '1.00' -> '0' lub '1'. Inne wartości -> None."""
+    """Zamienia status zapisany jako 0/1 lub 0.00/1.00 na '0' albo '1'. Dla innych wartości zwraca None."""
     try:
         return {0.0: "0", 1.0: "1"}.get(float(value))
     except ValueError:
@@ -35,7 +35,7 @@ def as_flag(value):
 
 
 def is_valid_time(value):
-    """Godzina HHMM; źródło dopuszcza też 2400 (północ)."""
+    """Sprawdza, czy godzina ma format HHMM. Źródło dopuszcza też 2400 (północ)."""
     if not (value.isascii() and value.isdigit() and len(value) <= 4):
         return False
     number = int(value)

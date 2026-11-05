@@ -39,7 +39,7 @@ def csv_text(rows, header=False):
 
 
 def run_mapper(text):
-    """Uruchom mapper tak, jak robi to Hadoop: CSV na stdin, liczniki na stderr."""
+    """Uruchamia mapper tak jak Hadoop: CSV na wejściu, liczniki na stderr."""
     out, err = io.StringIO(), io.StringIO()
     with patch.object(worker.Path, "read_text", return_value=json.dumps({"columns": HEADER})), \
          patch.dict(worker.os.environ, {"mapreduce_map_input_file": "/flights/raw/2024-01.csv"}), \

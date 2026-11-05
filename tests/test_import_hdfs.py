@@ -1,4 +1,4 @@
-"""Offline: transfer pliku, sumy kontrolne, przerwanie i ponowny import bez duplikatow."""
+"""Testy importu do HDFS: sumy kontrolne, przerwany transfer i ponowny import bez duplikatów."""
 import contextlib
 import hashlib
 import io
@@ -137,7 +137,7 @@ class HdfsImportTests(unittest.TestCase):
         self.assertEqual(self.backend.uploads.count("/flights/raw/.2024-01.csv.uploading"), 1)
 
     def test_docker_failure_exposes_reason(self):
-        # Test rzeczywistego wrappera
+        # Tutaj sprawdzamy prawdziwą funkcję docker(), bez atrapy HDFS.
         patch.stopall()
         failure = SimpleNamespace(returncode=1, stderr="NameNode unavailable", stdout="")
         with patch.object(importer.subprocess, "run", return_value=failure):

@@ -25,17 +25,17 @@ REASONS = {"structure": "błędna struktura CSV", "date": "data spoza miesiąca 
 
 
 def hadoop(*command, stdin=None, check=True):
-    """Wykonaj polecenie w kontenerze resourcemanager (hdfs, yarn, hadoop)."""
+    """Wykonuje polecenie (hdfs, yarn, hadoop) w kontenerze resourcemanager."""
     result = subprocess.run(
         ["docker", "compose", "exec", "-T", "resourcemanager", *command],
         cwd=ROOT, input=stdin, capture_output=True, text=True, encoding="utf-8")
     if check and result.returncode:
-        raise RuntimeError(result.stderr.strip() or "Błąd polecenia: " + " ".join(command))
+        raise RuntimeError(result.stderr.strip() or "Polecenie Docker zakończyło się błędem.")
     return result
 
 
 def run_job(months, output):
-    """Uruchom zadanie Hadoop Streaming (sam mapper, bez reducera). Zwróć log."""
+    """Uruchamia zadanie Hadoop Streaming bez reducera i zwraca jego log."""
     command = ["docker", "compose", "exec", "-T", "resourcemanager", "hadoop", "jar", STREAMING_JAR,
                "-D", "mapreduce.job.name=flights-cleaning",
                "-D", "mapreduce.job.reduces=0",  # każdy rekord czyścimy niezależnie
@@ -53,7 +53,7 @@ def run_job(months, output):
         for line in process.stdout:
             lines.append(line)
             if " map " in line or "ERROR" in line or "Submitted application" in line:
-                print(line.rstrip(), flush=True)
+                print(line.rstrip())
     log = "".join(lines)
     (RESULTS / "cleaning.log").write_text(log, encoding="utf-8")
     if process.returncode:
@@ -62,7 +62,7 @@ def run_job(months, output):
 
 
 def read_counters(log):
-    """Odczytaj z logu Hadoop liczniki z grupy FlightQuality."""
+    """Odczytuje z logu Hadoop liczniki z grupy FlightQuality."""
     counts, inside = {}, False
     for line in log.splitlines():
         if line.strip() == "FlightQuality":
@@ -76,7 +76,7 @@ def read_counters(log):
 
 
 def check_counts(counts, manifest, months):
-    """Każdy rekord z manifestu musi zostać zapisany albo odrzucony z podanym powodem."""
+    """Sprawdza, czy każdy rekord z manifestu został zapisany albo odrzucony."""
     for month in months:
         if counts.get("month_" + month) != manifest["files"][month]["records"]:
             raise ValueError(f"Liczba rekordów {month} nie zgadza się z manifestem.")
@@ -92,7 +92,7 @@ def number(value):
 
 
 def save_report(counts, months, output, application):
-    """Zapisz raport: JSON (do dalszego użycia) i krótki Markdown (do czytania)."""
+    """Zapisuje raport w dwóch wersjach: JSON i krótki Markdown."""
     report = {"finished_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
               "application_id": application, "hdfs_output": output,
               "months": months, "counters": counts}
@@ -139,13 +139,13 @@ def main():
     months = [args.month] if args.month else sorted(manifest["files"])
     output = "/flights/clean" + (f"-{args.month}" if args.month else "")
 
-    # Nie nadpisujemy istniejącego wyniku - usunięcie musi być świadomą decyzją.
+    # Istniejącego wyniku nie nadpisujemy - trzeba go usunąć ręcznie.
     if hadoop("hdfs", "dfs", "-test", "-e", output, check=False).returncode == 0:
         sys.exit(f"Katalog {output} już istnieje w HDFS. Aby powtórzyć czyszczenie, usuń go:\n"
                  f"  docker compose exec resourcemanager hdfs dfs -rm -r {output}")
 
     RESULTS.mkdir(exist_ok=True)
-    print(f"Hadoop: czyszczenie {len(months)} plików -> {output}", flush=True)
+    print(f"Czyszczenie {len(months)} plików w Hadoop. Wynik: {output}")
     log = run_job(months, output)
     counts = read_counters(log)
     check_counts(counts, manifest, months)
@@ -161,5 +161,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except KeyboardInterrupt:
+        sys.exit("\nPrzerwano. Zadanie mogło dalej działać w YARN - sprawdź: http://localhost:8088")
     except (OSError, ValueError, RuntimeError) as error:
         sys.exit(f"BŁĄD: {error}")

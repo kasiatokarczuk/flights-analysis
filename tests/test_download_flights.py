@@ -1,4 +1,4 @@
-"""Offline: oryginalny CSV, walidacja ZIP i bezpieczne wznowienie miesiecy."""
+"""Testy pobierania: rozpakowanie CSV, kontrola ZIP i wznawianie przerwanego pobierania."""
 import contextlib
 import csv
 import importlib.util
@@ -146,7 +146,7 @@ class FlightsTests(unittest.TestCase):
         self.run_month()
         first = (self.root / "2024-01.csv").read_bytes()
         (self.root / "2024-02.zip").write_bytes(b"not a zip")
-        with self.assertRaisesRegex(ValueError, "Uszkodzony ZIP"):
+        with self.assertRaisesRegex(ValueError, "Uszkodzony plik ZIP"):
             self.run_month("2024-02")
         self.assertFalse((self.root / "2024-02.zip").exists())
         self.assertEqual((self.root / "2024-01.csv").read_bytes(), first)
@@ -154,7 +154,7 @@ class FlightsTests(unittest.TestCase):
     def test_low_disk_space_stops_before_download(self):
         with patch.object(downloader.shutil, "disk_usage", return_value=SimpleNamespace(free=0)):
             with patch.object(downloader, "download_zip") as request:
-                with self.assertRaisesRegex(RuntimeError, "malo wolnego"):
+                with self.assertRaisesRegex(RuntimeError, "mało wolnego"):
                     self.run_month()
                 request.assert_not_called()
 
@@ -165,7 +165,7 @@ class FlightsTests(unittest.TestCase):
             zipped.writestr("flights.csv", raw)
         damaged = buffer.getvalue().replace(b"-7.00", b"-8.00", 1)
         (self.root / "2024-01.zip").write_bytes(damaged)
-        with self.assertRaisesRegex(ValueError, "Uszkodzony ZIP"):
+        with self.assertRaisesRegex(ValueError, "Uszkodzony plik ZIP"):
             self.run_month()
         self.assertFalse((self.root / "2024-01.csv").exists())
         self.assertFalse((self.root / "2024-01.zip").exists())
@@ -196,7 +196,7 @@ class FlightsTests(unittest.TestCase):
             return response
         with patch.object(downloader.urllib.request, "urlopen", side_effect=incomplete):
             with patch.object(downloader.time, "sleep"):
-                with self.assertRaisesRegex(RuntimeError, "3 probach"):
+                with self.assertRaisesRegex(RuntimeError, "3 próbach"):
                     downloader.download_zip("https://example.test", self.root / "2024-01.zip")
         self.assertFalse((self.root / "2024-01.zip").exists())
 
@@ -209,7 +209,7 @@ class FlightsTests(unittest.TestCase):
 
     def test_second_importer_is_blocked(self):
         with downloader.directory_lock(self.root):
-            with self.assertRaisesRegex(RuntimeError, "Pliki danych"):
+            with self.assertRaisesRegex(RuntimeError, "inny skrypt"):
                 with downloader.directory_lock(self.root):
                     self.fail("Acquired a second lock")
 

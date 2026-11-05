@@ -9,7 +9,7 @@ services:
     env_file:
       - ./infra/hadoop.env
     environment:
-      # This must match dfs.namenode.name.dir. Initialize an empty volume only.
+      # Ścieżka zgodna z dfs.namenode.name.dir. Pusty wolumin jest formatowany przy pierwszym starcie.
       ENSURE_NAMENODE_DIR: /data/name
     volumes:
       - namenode_data:/data
