@@ -160,10 +160,36 @@ Połączenie w MongoDB Compass: *New connection → Advanced Connection Options*
 - *Authentication*: Username/Password, użytkownik i hasło z `MONGO_APP_USER` / `MONGO_APP_PASSWORD`, *Authentication Database* `flights`,
 - *TLS/SSL*: *SSL/TLS Connection* `On`, *Certificate Authority (.pem)* — plik `secrets\tls\ca.pem`.
 
+## Import do MongoDB (lokalna baza i Atlas)
+
+```powershell
+python scripts/load_mongo.py                 # obie bazy
+python scripts/load_mongo.py --target local  # tylko jedna: local albo atlas
+python scripts/load_mongo.py --no-sample     # bez próbki lotów
+python scripts/db.py atlas                   # test połączenia z Atlas
+```
+
+Adres Atlas (`ATLAS_URI`) jest w pliku `.env`. Atlas szyfruje połączenia (TLS) i wymaga logowania domyślnie; dostęp mają tylko adresy IP dodane w *Network Access*.
+
+Kolekcje w bazie `flights`:
+
+| Kolekcja | Zawartość | `_id` |
+|---|---|---|
+| `analysis` | wyniki analiz MapReduce, jeden dokument na grupę | np. `carrier|WN`, `airport|ATL`, `total|all` |
+| `airports` | lotniska ze scrapingu Wikipedii | kod lotniska w danych BTS (np. `PBI`) |
+| `carriers` | przewoźnicy ze scrapingu | kod IATA (np. `9E`) |
+| `metadata` | manifest danych, raport jakości, informacje o analizie i scrapingu | `manifest`, `cleaning`, `analysis`, `scraping` |
+| `import_log` | jeden wpis na każde uruchomienie importu z liczbą zmian | automatyczny |
+| `flights_sample` | oczyszczone loty z września 2025 czytane z HDFS (tylko baza lokalna) | klucz lotu, np. `2025-09-01|9E|4800|CHS|JFK|0700` |
+
+Główny zbiór danych pozostaje w HDFS; do MongoDB trafiają wyniki analiz, dane ze scrapingu, metadane i próbka lotów do przeglądania. Próbki nie ładujemy do Atlas, bo darmowy klaster ma limit 512 MB.
+
+Ponowne uruchomienie nie powiela danych: każdy dokument ma stały `_id` i jest zapisywany operacją *zastąp albo wstaw* (upsert). Dokumenty, których nie ma już w plikach źródłowych, są usuwane. Skrypt wypisuje dla każdej kolekcji liczbę dokumentów nowych, zmienionych, bez zmian i usuniętych, a po zapisie sprawdza, czy liczba dokumentów w bazie zgadza się ze źródłem. Przy drugim uruchomieniu wszystkie dokumenty są „bez zmian”.
+
 ## Testy
 
 ```powershell
 python -B -m unittest discover -s tests -v
 ```
 
-Testy obejmują pobieranie danych, import do HDFS i reguły czyszczenia, w tym CSV z przecinkami wewnątrz pól, fragmenty bez nagłówka, braki, błędne statusy oraz wartości liczbowe. Testy pobierania i importu korzystają z blokady plików Windows (`msvcrt`), więc uruchamia się je na Windows.
+Testy obejmują pobieranie danych, import do HDFS i reguły czyszczenia, w tym CSV z przecinkami wewnątrz pól, fragmenty bez nagłówka, braki, błędne statusy oraz wartości liczbowe. Testy pobierania i importu korzystają z blokady plików Windows (`msvcrt`), więc uruchamia się je na Windows. Import do MongoDB testujemy na bazie działającej w pamięci (`mongomock`), bez serwera.
