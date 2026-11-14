@@ -138,6 +138,28 @@ Wyniki:
 - `results/carriers.json` — przewoźnicy z naszych danych,
 - `results/scraping.md` — raport: liczba rekordów, problemy jakości, dopasowanie do naszych lotnisk i przewoźników.
 
+## Lokalna MongoDB (TLS i logowanie)
+
+Baza działa w kontenerze `mongodb` i przyjmuje wyłącznie połączenia szyfrowane (`--tlsMode requireTLS`) od zalogowanych użytkowników (`--auth`). Przygotowanie (jednorazowo):
+
+```powershell
+copy .env.example .env               # następnie wpisz własne hasła w .env
+python scripts/make_certs.py         # certyfikaty TLS w secrets/tls/
+docker compose up -d mongodb
+python scripts/db.py local           # test połączenia i zabezpieczeń
+```
+
+- `make_certs.py` tworzy własny urząd certyfikacji (`ca.pem`) i podpisany nim certyfikat serwera (`server.pem`) dla nazw `localhost` i `mongodb`. Klient ufa serwerowi, bo zna `ca.pem`; własnego certyfikatu klient nie potrzebuje.
+- Przy pierwszym starcie pustej bazy powstają dwa konta: administrator (`MONGO_ROOT_USER`) i użytkownik aplikacji (`MONGO_APP_USER`) z prawem odczytu i zapisu wyłącznie bazy `flights` (`infra/mongo-init.js`). Skrypty projektu łączą się jako użytkownik aplikacji. Zmiana haseł w `.env` po pierwszym starcie nie zmienia kont w istniejącej bazie.
+- `db.py local` łączy się z bazą, a potem sprawdza, że serwer odrzuca połączenie bez TLS i logowanie złym hasłem.
+- Pliki `.env` i `secrets/` nie trafiają do repozytorium (`.gitignore`). W hasłach nie używaj znaku `$` — Docker Compose traktuje go jako początek zmiennej.
+
+Połączenie w MongoDB Compass: *New connection → Advanced Connection Options*:
+
+- *General*: Host `localhost:27017`,
+- *Authentication*: Username/Password, użytkownik i hasło z `MONGO_APP_USER` / `MONGO_APP_PASSWORD`, *Authentication Database* `flights`,
+- *TLS/SSL*: *SSL/TLS Connection* `On`, *Certificate Authority (.pem)* — plik `secrets\tls\ca.pem`.
+
 ## Testy
 
 ```powershell

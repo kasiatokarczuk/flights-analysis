@@ -96,6 +96,40 @@ services:
     restart: unless-stopped  # po starcie HDFS bywa chwilę w safe mode, wtedy serwer startuje ponownie
     mem_limit: 1g
 
+  # Lokalna baza MongoDB: przyjmuje tylko połączenia szyfrowane (TLS) i wymaga logowania.
+  # Certyfikaty tworzy scripts/make_certs.py, hasła są w pliku .env (wzór: .env.example).
+  mongodb:
+    image: mongo:8.0
+    hostname: mongodb
+    command: ["mongod", "--auth",
+              "--tlsMode", "requireTLS",
+              "--tlsCertificateKeyFile", "/etc/mongo-tls/server.pem",
+              "--tlsCAFile", "/etc/mongo-tls/ca.pem",
+              # Klient musi ufać serwerowi, ale nie musi mieć własnego certyfikatu.
+              "--tlsAllowConnectionsWithoutCertificates"]
+    environment:
+      # Użytkownicy powstają tylko przy pierwszym starcie pustej bazy.
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_DATABASE: ${MONGO_DATABASE}
+      MONGO_APP_USER: ${MONGO_APP_USER}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD}
+    volumes:
+      - mongodb_data:/data/db
+      - ./secrets/tls:/etc/mongo-tls:ro
+      - ./infra/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    ports:
+      - "127.0.0.1:27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--tls", "--tlsCAFile", "/etc/mongo-tls/ca.pem",
+             "--host", "localhost", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    mem_limit: 1g
+
 volumes:
   namenode_data:
   datanode_data:
+  mongodb_data:
