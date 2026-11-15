@@ -14,11 +14,15 @@ Pobrany zbiór obejmuje styczeń 2024 – wrzesień 2025: **21 plików CSV, 12 3
 
 ## Wymagania
 
-Windows, Python 3.11 lub nowszy oraz uruchomiony Docker Desktop z Docker Compose. Biblioteki potrzebne do scrapingu:
+Windows, Python 3.11 lub nowszy oraz uruchomiony Docker Desktop z Docker Compose. Biblioteki instalujemy w osobnym środowisku wirtualnym projektu, żeby nie zmieniały wersji pakietów używanych przez inne projekty:
 
 ```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
+
+Przed uruchamianiem skryptów środowisko trzeba aktywować (`.venv\Scripts\Activate.ps1`). Jeśli PowerShell blokuje aktywację, wystarczy raz wykonać `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 Poniższe polecenia należy wykonywać w głównym folderze projektu.
 
@@ -185,6 +189,25 @@ Kolekcje w bazie `flights`:
 Główny zbiór danych pozostaje w HDFS; do MongoDB trafiają wyniki analiz, dane ze scrapingu, metadane i próbka lotów do przeglądania. Próbki nie ładujemy do Atlas, bo darmowy klaster ma limit 512 MB.
 
 Ponowne uruchomienie nie powiela danych: każdy dokument ma stały `_id` i jest zapisywany operacją *zastąp albo wstaw* (upsert). Dokumenty, których nie ma już w plikach źródłowych, są usuwane. Skrypt wypisuje dla każdej kolekcji liczbę dokumentów nowych, zmienionych, bez zmian i usuniętych, a po zapisie sprawdza, czy liczba dokumentów w bazie zgadza się ze źródłem. Przy drugim uruchomieniu wszystkie dokumenty są „bez zmian”.
+
+## Wizualizacja: panel i wykresy
+
+```powershell
+streamlit run scripts/dashboard.py   # panel w przeglądarce (http://localhost:8501)
+python scripts/charts.py             # wykresy PNG do results/charts/ (opcja --target atlas)
+```
+
+Panel czyta dane na bieżąco z MongoDB; na pasku bocznym wybiera się bazę (lokalna albo Atlas). Zakładki:
+
+- **Przegląd** — liczba lotów, odsetek lotów na czas, średnie i mediana opóźnienia, odsetek odwołań, zakres danych,
+- **Przewoźnicy** — punktualność z nazwami i typem przewoźnika ze scrapingu, do wyboru miara,
+- **Sezonowość** — miesiące i dni tygodnia,
+- **Pora dnia** — odsetek opóźnionych odlotów według godziny planowanego odlotu,
+- **Przyczyny** — udział pięciu przyczyn opóźnień, łącznie albo dla wybranego przewoźnika,
+- **Lotniska** — wyniki lotnisk złączone (`$lookup`) z danymi ze scrapingu: porównanie według wielkości lotniska (kategoria FAA) i według stanów,
+- **Próbka lotów** — filtrowanie lotów z września 2025 (przewoźnik, lotnisko, odwołane); podsumowanie liczy MongoDB (`$group`). Tylko baza lokalna.
+
+Zapytania są w `queries.py`, a wykresy (matplotlib) w `charts.py`. Panel i skrypt PNG korzystają z tych samych funkcji, więc wykresy w sprawozdaniu są takie same jak w panelu. Odsetki dla grup lotnisk (wielkość, stan) są średnimi ważonymi liczbą lotów.
 
 ## Testy
 

@@ -2,4 +2,7 @@ requests
 beautifulsoup4
 cryptography
 pymongo
+pandas
+matplotlib
+streamlit
 mongomock
