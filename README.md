@@ -1,6 +1,6 @@
 # Big Data — analiza lotów w USA
 
-Projekt przetwarza dane o lotach krajowych w USA z wykorzystaniem HDFS i Hadoop MapReduce. Kod jest napisany w Pythonie, a klaster HDFS i YARN działa lokalnie w Dockerze.
+Projekt analizuje opóźnienia i odwołania lotów krajowych w USA. Dane BTS (5,57 GB) są przechowywane w HDFS i przetwarzane w Hadoop MapReduce (Hadoop Streaming), dane o lotniskach i przewoźnikach pochodzą ze scrapingu Wikipedii, a wyniki trafiają do dwóch baz MongoDB: lokalnej (Docker) i MongoDB Atlas. Wyniki pokazuje panel w przeglądarce. Kod jest napisany w Pythonie, a klaster Hadoop i lokalna baza działają w Dockerze.
 
 ## Dane
 
@@ -25,6 +25,45 @@ pip install -r requirements.txt
 Przed uruchamianiem skryptów środowisko trzeba aktywować (`.venv\Scripts\Activate.ps1`). Jeśli PowerShell blokuje aktywację, wystarczy raz wykonać `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 Poniższe polecenia należy wykonywać w głównym folderze projektu.
+
+## Kolejność uruchamiania
+
+Pierwsze uruchomienie (szczegóły w kolejnych sekcjach):
+
+```powershell
+.venv\Scripts\Activate.ps1
+copy .env.example .env                     # jednorazowo: własne hasła i adres Atlas
+python scripts/make_certs.py               # jednorazowo: certyfikaty TLS dla MongoDB
+docker compose up -d                       # Hadoop (HDFS, YARN, historia zadań) i MongoDB
+
+python scripts/download_flights.py         # 1. pobranie danych BTS do data/
+python scripts/import_hdfs.py              # 2. kopia do HDFS /flights/raw
+python scripts/run_cleaning.py             # 3. czyszczenie w MapReduce -> /flights/clean
+python scripts/run_analysis.py             # 4. analizy w MapReduce -> /flights/analysis
+python scripts/scrape_wikipedia.py         # 5. scraping lotnisk i przewoźników
+python scripts/db.py local                 # 6. test połączenia z bazami
+python scripts/db.py atlas
+python scripts/load_mongo.py               # 7. import do obu baz MongoDB
+streamlit run scripts/dashboard.py         # 8. panel w przeglądarce
+```
+
+Każdy krok można powtórzyć bez szkody dla danych: pobieranie i import do HDFS pomijają gotowe pliki, zadania MapReduce nie nadpisują istniejących wyników, a import do MongoDB aktualizuje dokumenty zamiast je powielać.
+
+## Struktura projektu
+
+| Ścieżka | Zawartość |
+|---|---|
+| `scripts/download_flights.py`, `import_hdfs.py` | pobieranie danych BTS i kopia do HDFS |
+| `scripts/clean_flights.py`, `run_cleaning.py` | czyszczenie danych w MapReduce (mapper i reducer, uruchomienie) |
+| `scripts/analyze_flights.py`, `run_analysis.py` | analizy statystyczne w MapReduce |
+| `scripts/common.py` | wspólne funkcje uruchamiania poleceń i zadań Hadoop |
+| `scripts/scrape_wikipedia.py` | web scraping Wikipedii |
+| `scripts/make_certs.py`, `db.py`, `load_mongo.py` | certyfikaty TLS, połączenia i import do MongoDB |
+| `scripts/queries.py`, `charts.py`, `dashboard.py` | zapytania, wykresy i panel |
+| `tests/` | testy jednostkowe |
+| `compose.yaml`, `infra/` | konfiguracja kontenerów Hadoop i MongoDB |
+| `data/manifest.json` | opis pobranych plików (źródło, liczba rekordów, SHA-256); same dane nie są w repozytorium |
+| `results/` | raporty jakości, wyniki analiz, dane ze scrapingu, wykresy |
 
 ## Pobieranie danych
 
@@ -215,4 +254,13 @@ Zapytania są w `queries.py`, a wykresy (matplotlib) w `charts.py`. Panel i skry
 python -B -m unittest discover -s tests -v
 ```
 
-Testy obejmują pobieranie danych, import do HDFS i reguły czyszczenia, w tym CSV z przecinkami wewnątrz pól, fragmenty bez nagłówka, braki, błędne statusy oraz wartości liczbowe. Testy pobierania i importu korzystają z blokady plików Windows (`msvcrt`), więc uruchamia się je na Windows. Import do MongoDB testujemy na bazie działającej w pamięci (`mongomock`), bez serwera.
+Testy (65) obejmują:
+
+- pobieranie danych, wznawianie przerwanego pobierania i import do HDFS z kontrolą sum,
+- reguły czyszczenia (pola z przecinkami, fragmenty bez nagłówka, braki, błędne wartości) i usuwanie duplikatów,
+- statystyki analiz, w tym medianę i niezależność wyniku od podziału danych między mappery,
+- parsowanie tabel Wikipedii i dopasowanie kodów lotnisk i przewoźników,
+- certyfikaty TLS i odczyt pliku `.env`,
+- import do MongoDB (ponowny import bez duplikatów, usuwanie nieaktualnych danych) i zapytania z `$lookup`.
+
+Testy pobierania i importu korzystają z blokady plików Windows (`msvcrt`), więc uruchamia się je na Windows. Import do MongoDB testujemy na bazie działającej w pamięci (`mongomock`), bez serwera.
